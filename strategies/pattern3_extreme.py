@@ -95,7 +95,9 @@ def pattern3_extreme(df: pd.DataFrame, risk_per_trade: float = 100.0, rr_ratio: 
                             'tp': tp,
                             'result_R': result_R,
                             'risk_usd': risk_per_trade,
-                            'rr_ratio': rr_ratio
+                            'rr_ratio': rr_ratio,
+                            'direction': 'long',  # This strategy only trades long positions
+                            'side': 'buy'
                         })
     
     return trades

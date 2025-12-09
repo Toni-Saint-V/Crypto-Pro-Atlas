@@ -5,7 +5,7 @@ AI-powered crypto trading dashboard with WebSocket support
 
 import uvicorn
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect, Query
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from fastapi.middleware.cors import CORSMiddleware
@@ -13,18 +13,21 @@ import asyncio
 import json
 import random
 import os
-import time
 import logging
 from typing import List, Dict, Any, Optional
-from datetime import datetime
+from datetime import datetime, timezone
+import math
+import time
+import numpy as np
 
 log = logging.getLogger(__name__)
 from core.backtest.engine import BacktestEngine
-from web.bybit_client import fetch_ohlcv, get_klines
 from core.ml.ml_service import MLService
 from core.ai.toni_service import ToniAIService, ToniContext
 from core.risk.risk_manager import RiskManager, RiskLimits
 from core.exchange.factory import create_exchange_provider
+from core.market_data.service import MarketDataService
+from core.dashboard.service import DashboardSnapshot, get_dashboard_snapshot
 import yaml
 
 # === FASTAPI INITIALIZATION ===
@@ -79,7 +82,8 @@ class ConnectionManager:
         for connection in self.ai_connections:
             try:
                 await connection.send_json(message)
-            except:
+            except (WebSocketDisconnect, ConnectionError, RuntimeError) as e:
+                log.debug(f"Connection error during AI broadcast: {e}")
                 disconnected.append(connection)
         for conn in disconnected:
             await self.disconnect_ai(conn)
@@ -90,7 +94,8 @@ class ConnectionManager:
         for connection in self.trade_connections:
             try:
                 await connection.send_json(message)
-            except:
+            except (WebSocketDisconnect, ConnectionError, RuntimeError) as e:
+                log.debug(f"Connection error during trade broadcast: {e}")
                 disconnected.append(connection)
         for conn in disconnected:
             await self.disconnect_trade(conn)
@@ -120,6 +125,7 @@ risk_limits = RiskLimits(
 backtest_engine = BacktestEngine(risk_limits=risk_limits)
 ml_service = MLService()
 global_risk_manager = RiskManager(limits=risk_limits)
+market_data_service = MarketDataService()
 
 # Default exchange provider
 default_exchange = config.get("exchange", {}).get("default", "bybit")
@@ -139,99 +145,371 @@ last_backtest_context = None
 
 # === ROUTES ===
 
+
+def _make_test_dashboard_payload() -> dict:
+    """
+    Генерируем стабильный тестовый payload для /api/dashboard.
+    Никаких запросов к биржам, только локальные данные.
+    """
+    equity = 10_000.0
+    balance = 9_800.0
+    portfolio_value = 10_000.0
+    pnl = 200.0
+    risk = "Medium"
+    confidence = 65.0
+
+    positions = [
+        {
+            "symbol": "BTCUSDT",
+            "size": 0.15,
+            "entry_price": 50_000.0,
+            "pnl": 150.0,
+            "side": "LONG",
+        },
+        {
+            "symbol": "ETHUSDT",
+            "size": 1.0,
+            "entry_price": 2_500.0,
+            "pnl": 50.0,
+            "side": "LONG",
+        },
+    ]
+
+    open_orders = [
+        {
+            "symbol": "BTCUSDT",
+            "price": 49_500.0,
+            "size": 0.05,
+            "side": "BUY",
+            "type": "limit",
+        }
+    ]
+
+    return {
+        "mode": "test",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "equity": equity,
+        "balance": balance,
+        "portfolio_value": portfolio_value,
+        "pnl": pnl,
+        "risk": risk,
+        "confidence": confidence,
+        "positions": positions,
+        "open_orders": open_orders,
+        "exchange": "bybit-test",
+        "symbol": "BTCUSDT",
+        "timeframe": "1m",
+    }
+
+
+def _make_test_candles(symbol: str, timeframe: str = "1m", limit: int = 200) -> List[Dict]:
+    """
+    Генерируем синтетические свечи вокруг базовой цены.
+    Время: unix timestamp (секунды), шаг: 60 секунд.
+    Никаких внешних запросов, только локальная математика.
+    """
+    now = int(time.time())
+    step_sec = 60
+    base_price = 50_000.0 if symbol.upper().startswith("BTC") else 2_500.0
+
+    candles: List[Dict] = []
+    for i in range(limit):
+        t = now - (limit - i) * step_sec
+        offset = 300.0 * math.sin(i / 10.0)
+        noise = 50.0 * math.sin(i / 3.0)
+        open_ = base_price + offset + noise
+        close = open_ + (math.sin(i / 5.0) * 100.0)
+        high = max(open_, close) + 50.0
+        low = min(open_, close) - 50.0
+        volume = 10_000 + i * 10
+
+        candles.append(
+            {
+                "time": t,
+                "open": round(open_, 2),
+                "high": round(high, 2),
+                "low": round(low, 2),
+                "close": round(close, 2),
+                "volume": float(volume),
+            }
+        )
+
+    return candles
+
 @app.get("/", response_class=HTMLResponse)
-async def index(request: Request):
-    """Redirect root to trading core"""
-    return templates.TemplateResponse("trading_core.html", {"request": request})
+async def index():
+    """Redirect root to the unified dashboard"""
+    return RedirectResponse(url="/dashboard", status_code=307)
 
-@app.get("/dashboard_new", response_class=HTMLResponse)
-async def dashboard_new(request: Request):
-    """Main neural dashboard"""
-    return templates.TemplateResponse("dashboard_new.html", {"request": request})
-
-@app.get("/trading_core", response_class=HTMLResponse)
-async def trading_core(request: Request):
-    """Render the Trading Core dashboard"""
-    return templates.TemplateResponse("trading_core.html", {"request": request})
+@app.get("/dashboard", response_class=HTMLResponse)
+async def dashboard(request: Request):
+    """Render the unified dashboard"""
+    return templates.TemplateResponse("dashboard.html", {"request": request})
 
 # === REST API ENDPOINTS ===
 
 @app.get("/api/dashboard")
-async def api_dashboard():
-    """Return dynamic dashboard metrics"""
-    return JSONResponse({
-        "pnl": round(random.uniform(-2, 2), 2),
-        "risk": random.choice(["Low", "Medium", "High"]),
-        "confidence": round(random.uniform(50, 99), 1)
-    })
+async def api_dashboard_test_mode():
+    """
+    TEST-режим: всегда возвращаем фикстурный payload для дашборда.
+    Никаких обращений к бирже и внешним сервисам.
+    """
+    return _make_test_dashboard_payload()
+
+
+@app.get("/api/dashboard/snapshot", response_model=DashboardSnapshot)
+async def api_get_dashboard_snapshot(
+    symbol: str = Query("BTCUSDT", description="Trading pair symbol"),
+    timeframe: str = Query("15m", description="Requested timeframe"),
+):
+    """Return the structured dashboard snapshot."""
+    return await get_dashboard_snapshot(symbol=symbol, timeframe=timeframe)
 
 @app.get("/api/candles")
 async def api_candles(
-    symbol: str = Query("BTCUSDT", description="Trading pair symbol"),
-    interval: str = Query("60", description="Timeframe in minutes (1-1500) or standard (1m, 5m, 15m, etc.)"),
-    limit: int = Query(200, description="Number of candles to fetch"),
-    exchange: str = Query("bybit", description="Exchange name (bybit, binance)")
+    exchange: str = Query("bybit", description="Exchange name"),
+    symbol: str = Query("BTCUSDT", description="Trading pair"),
+    timeframe: str = Query("15m", description="Timeframe"),
+    limit: int = Query(500, description="Number of candles"),
+    mode: str = Query("live", description="Mode: live or test"),
 ):
     """
-    Fetch OHLCV candles from specified exchange.
-    Supports timeframes from 1m to 1500m.
+    Get real market data candles from exchange or test mode.
     """
     try:
-        # Use exchange provider if specified, otherwise fallback to old method
-        if exchange and exchange.lower() in ["bybit", "binance"]:
-            provider = create_exchange_provider(
-                exchange.lower(),
-                testnet=exchange_config.get(exchange.lower(), {}).get("testnet", True)
-            )
-            if provider:
-                candles = await provider.fetch_klines(symbol, interval, limit)
-            else:
-                candles = await fetch_ohlcv(symbol=symbol, interval=interval, limit=limit)
+        if mode == "test":
+            # Test mode: return synthetic candles
+            candles = _make_test_candles(symbol=symbol, timeframe=timeframe, limit=limit)
+            return {
+                "exchange": exchange,
+                "symbol": symbol,
+                "timeframe": timeframe,
+                "mode": "test",
+                "candles": candles,
+                "count": len(candles),
+            }
         else:
-            candles = await fetch_ohlcv(symbol=symbol, interval=interval, limit=limit)
-        
-        if not candles:
-            # Fallback to mock data if fetch fails
+            # Live mode: get real data from exchange
+            market_service = MarketDataService()
+            ohlcv_data = await market_service.get_candles(
+                exchange=exchange,
+                symbol=symbol,
+                timeframe=timeframe,
+                limit=limit,
+                mode="live"
+            )
+            
+            # Convert OHLCV to dict format
             candles = []
-            base_price = 42000.0
-            base_time = int(time.time()) - (limit * 60)
-            for i in range(limit):
-                price_change = random.uniform(-200, 200)
-                base_price += price_change
-                base_price = max(35000, min(50000, base_price))
+            for candle in ohlcv_data:
                 candles.append({
-                    "time": base_time + (i * 60),
-                    "open": base_price + random.uniform(-50, 50),
-                    "high": base_price + random.uniform(50, 150),
-                    "low": base_price - random.uniform(50, 150),
-                    "close": base_price + random.uniform(-50, 50),
-                    "volume": random.uniform(100, 1000)
+                    "time": candle.time,
+                    "open": float(candle.open),
+                    "high": float(candle.high),
+                    "low": float(candle.low),
+                    "close": float(candle.close),
+                    "volume": float(candle.volume),
                 })
+            
+            return {
+                "exchange": exchange,
+                "symbol": symbol,
+                "timeframe": timeframe,
+                "mode": "live",
+                "candles": candles,
+                "count": len(candles),
+            }
+    except Exception as e:
+        log.error(f"Error fetching candles: {e}")
+        # Fallback to test data on error
+        candles = _make_test_candles(symbol=symbol, timeframe=timeframe, limit=limit)
+        return {
+            "exchange": exchange,
+            "symbol": symbol,
+            "timeframe": timeframe,
+            "mode": "test",
+            "candles": candles,
+            "count": len(candles),
+            "error": str(e),
+        }
+
+
+@app.get("/api/selfcheck")
+async def api_selfcheck():
+    """
+    Простая самопроверка TEST-режима.
+    """
+    dash = _make_test_dashboard_payload()
+    candles = _make_test_candles(symbol="BTCUSDT", timeframe="1m", limit=10)
+    return {
+        "ok": True,
+        "dashboard_sample": {
+            "equity": dash.get("equity"),
+            "balance": dash.get("balance"),
+            "pnl": dash.get("pnl"),
+            "risk": dash.get("risk"),
+            "confidence": dash.get("confidence"),
+        },
+        "candles_sample_len": len(candles),
+    }
+
+@app.get("/api/ai/predict")
+async def api_ai_predict(
+    symbol: str = Query("BTCUSDT", description="Trading pair symbol"),
+    timeframe: str = Query("15m", description="Timeframe for prediction"),
+):
+    """AI market prediction endpoint - provides price predictions and market analysis"""
+    try:
+        from core.market_data.service import MarketDataService
+        
+        # Get recent market data
+        market_service = MarketDataService()
+        ohlcv_data = await market_service.get_candles(
+            exchange="bybit",
+            symbol=symbol,
+            timeframe=timeframe,
+            limit=100,
+            mode="live"
+        )
+        
+        if not ohlcv_data or len(ohlcv_data) < 10:
+            return JSONResponse({
+                "price_target": None,
+                "price_change": None,
+                "signal_strength": 0,
+                "sentiment": "Недостаточно данных",
+                "support": None,
+                "resistance": None
+            })
+        
+        # Calculate predictions based on recent price action
+        recent_prices = [float(c.close) for c in ohlcv_data[-20:]]
+        current_price = recent_prices[-1]
+        
+        # Simple momentum-based prediction
+        price_change_24h = ((current_price - recent_prices[0]) / recent_prices[0]) * 100 if recent_prices[0] > 0 else 0
+        
+        # Calculate support and resistance
+        highs = [float(c.high) for c in ohlcv_data[-50:]]
+        lows = [float(c.low) for c in ohlcv_data[-50:]]
+        support = min(lows) if lows else current_price * 0.98
+        resistance = max(highs) if highs else current_price * 1.02
+        
+        # Predict next price (momentum extrapolation)
+        if len(recent_prices) >= 5:
+            momentum = (recent_prices[-1] - recent_prices[-5]) / recent_prices[-5]
+        else:
+            momentum = 0
+        
+        predicted_change = momentum * 2  # Extrapolate momentum
+        price_target = current_price * (1 + predicted_change / 100)
+        
+        # Signal strength based on volatility and momentum
+        if len(recent_prices) > 1:
+            volatility = np.std(recent_prices) / current_price * 100
+        else:
+            volatility = 0
+        signal_strength = min(100, max(0, abs(momentum) * 100 - volatility * 10))
+        
+        # Sentiment
+        if momentum > 0.01:
+            sentiment = "Сильное бычье"
+        elif momentum > 0:
+            sentiment = "Бычье"
+        elif momentum < -0.01:
+            sentiment = "Сильное медвежье"
+        else:
+            sentiment = "Медвежье"
         
         return JSONResponse({
-            "symbol": symbol,
-            "interval": interval,
-            "exchange": exchange,
-            "candles": candles,
-            "count": len(candles)
+            "price_target": round(price_target, 2),
+            "price_change": round(predicted_change, 2),
+            "signal_strength": round(signal_strength, 1),
+            "sentiment": sentiment,
+            "support": round(support, 2),
+            "resistance": round(resistance, 2)
         })
     except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
+        log.error(f"AI prediction error: {e}", exc_info=True)
+        return JSONResponse({
+            "price_target": None,
+            "price_change": None,
+            "signal_strength": 0,
+            "sentiment": "Ошибка анализа",
+            "support": None,
+            "resistance": None
+        }, status_code=500)
+
+@app.post("/api/ai/chat")
+async def api_ai_chat(request: Request):
+    """AI chat endpoint for conversational interface"""
+    try:
+        try:
+            body = await request.json()
+        except (ValueError, json.JSONDecodeError) as e:
+            log.warning(f"Invalid JSON in AI chat request: {e}")
+            return JSONResponse({
+                "response": "Неверный формат запроса. Ожидается JSON.",
+                "error": "Invalid JSON"
+            }, status_code=400)
+        
+        user_message = body.get("message", "")
+        context = body.get("context", {})
+        
+        # Use Toni AI service (created at module scope)
+        try:
+            response = await toni_service.answer(
+                user_message,
+                ToniContext(
+                    current_symbol=context.get("symbol", "BTCUSDT"),
+                    current_timeframe=context.get("timeframe", "15m"),
+                    is_live_mode=True,
+                    additional_data={"balance": context.get("balance", 10000)}
+                )
+            )
+        except Exception as e:
+            log.warning(f"Toni service error, using fallback: {e}")
+            # Fallback to simple response generator
+            response = generate_ai_response(user_message)
+        
+        return JSONResponse({
+            "response": response,
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        })
+    except Exception as e:
+        log.error(f"AI chat error: {e}", exc_info=True)
+        return JSONResponse({
+            "response": "Извините, произошла ошибка. Попробуйте позже.",
+            "error": str(e)
+        }, status_code=500)
 
 @app.post("/api/backtest/run")
-async def api_backtest_run(
-    symbol: str = Query("BTCUSDT"),
-    interval: str = Query("60"),
-    strategy: str = Query("pattern3_extreme"),
-    risk_per_trade: float = Query(100.0),
-    rr_ratio: float = Query(4.0),
-    limit: int = Query(500)
-):
+async def api_backtest_run(request: Request):
     """
     Run backtest with specified parameters.
+    Accepts JSON body or query parameters.
     Returns trades, equity curve, and performance metrics.
     """
     try:
+        # Try to get parameters from JSON body first
+        try:
+            body = await request.json()
+            symbol = body.get("symbol", "BTCUSDT")
+            interval = body.get("interval", "60")
+            strategy = body.get("strategy", "pattern3_extreme")
+            risk_per_trade = float(body.get("risk_per_trade", 100.0))
+            rr_ratio = float(body.get("rr_ratio", 4.0))
+            limit = int(body.get("limit", 500))
+        except (ValueError, KeyError, TypeError) as json_error:
+            # Fallback to query parameters if JSON parsing fails
+            log.debug(f"JSON body parsing failed, using query params: {json_error}")
+            symbol = request.query_params.get("symbol", "BTCUSDT")
+            interval = request.query_params.get("interval", "60")
+            strategy = request.query_params.get("strategy", "pattern3_extreme")
+            risk_per_trade = float(request.query_params.get("risk_per_trade", 100.0))
+            rr_ratio = float(request.query_params.get("rr_ratio", 4.0))
+            limit = int(request.query_params.get("limit", 500))
+        
         result = backtest_engine.run(
             symbol=symbol,
             interval=interval,
@@ -603,6 +881,39 @@ async def websocket_endpoint(websocket: WebSocket):
     except WebSocketDisconnect:
         print("🔴 WebSocket disconnected")
 
+@app.websocket("/ws/dashboard")
+async def ws_dashboard(websocket: WebSocket):
+    """
+    Dashboard WebSocket endpoint for real-time snapshot updates.
+    Sends periodic dashboard snapshots to connected clients.
+    """
+    await websocket.accept()
+    try:
+        # При подключении: отправляем первый снапшот
+        snapshot = await get_dashboard_snapshot()
+        await websocket.send_json({
+            "type": "dashboard_update",
+            "payload": snapshot.dict(),
+        })
+
+        # Простой таймер: периодически отправляем обновлённый снапшот
+        while True:
+            await asyncio.sleep(5.0)
+            snapshot = await get_dashboard_snapshot()
+            await websocket.send_json({
+                "type": "dashboard_update",
+                "payload": snapshot.dict(),
+            })
+    except WebSocketDisconnect:
+        # тихо выходим без ошибок
+        pass
+    except Exception as exc:
+        print(f"[WS /ws/dashboard] error: {exc}")
+        try:
+            await websocket.close()
+        except Exception:
+            pass
+
 # === HELPER FUNCTIONS ===
 
 def generate_ai_response(user_message: str) -> str:
@@ -683,6 +994,5 @@ def handle_command(command: str) -> str:
 
 if __name__ == "__main__":
     print("🚀 Launching CryptoBot Pro Dashboard")
-    print("📊 Trading Core: http://127.0.0.1:8000/trading_core")
-    print("🌐 Dashboard: http://127.0.0.1:8000/dashboard_new")
+    print("🌐 Dashboard: http://127.0.0.1:8000/dashboard")
     uvicorn.run("server:app", host="0.0.0.0", port=8000, reload=True)

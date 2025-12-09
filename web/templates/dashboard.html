@@ -1,142 +1,858 @@
 <!DOCTYPE html>
-<html lang=\"ru\">
+<html lang="ru">
 <head>
-  <meta charset=\"UTF-8\">
-  <title>CryptoBot Pro — Личный дашборд</title>
-  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">
-  <link rel=\"stylesheet\" href=\"/static/css/ui_colors.css\">
-  <link rel=\"stylesheet\" href=\"/static/css/dashboard.css\">
-  <script defer src=\"/static/js/dashboard.js\"></script>
-  <script src=\"/static/lib/lightweight-charts.js\"></script>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CryptoBot Pro - Dashboard</title>
+    
+    <!-- External Libraries -->
+    <script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js" defer></script>
+    
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap');
+        
+        * {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+            box-sizing: border-box;
+        }
+        
+        html, body {
+            margin: 0;
+            padding: 0;
+            height: 100vh;
+            width: 100vw;
+            overflow: hidden;
+        }
+        
+        body {
+            background: linear-gradient(135deg, #0a0a1a 0%, #1a1a3e 50%, #0f0f23 100%);
+            color: #d0d4e4;
+        }
+        
+        .glass-card {
+            background: rgba(15, 23, 42, 0.7);
+            backdrop-filter: blur(20px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 12px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+        }
+        
+        .gradient-text {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 50%, #f093fb 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        
+        .status-online { 
+            animation: pulse-green 2s infinite;
+        }
+        
+        @keyframes pulse-green {
+            0% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.7); }
+            70% { box-shadow: 0 0 0 10px rgba(34, 197, 94, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0); }
+        }
+        
+        .chart-container {
+            width: 100%;
+            height: 100%;
+            border-radius: 12px;
+            overflow: hidden;
+            background: #050811;
+            position: relative;
+            min-height: 300px;
+        }
+        
+        #main-chart {
+            width: 100%;
+            height: 100%;
+            min-height: 300px;
+        }
+        
+        .trade-tooltip {
+            position: absolute;
+            background: rgba(15, 23, 42, 0.95);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 12px;
+            padding: 12px;
+            min-width: 200px;
+            z-index: 1000;
+            pointer-events: none;
+            opacity: 0;
+            transition: opacity 0.2s;
+        }
+        
+        .trade-tooltip.visible {
+            opacity: 1;
+        }
+        
+        .ticker {
+            height: 48px;
+            overflow: hidden;
+            white-space: nowrap;
+            position: relative;
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+        }
+        
+        .ticker-content {
+            display: inline-block;
+            white-space: nowrap;
+            padding: 0 20px;
+            line-height: 48px;
+            font-size: 15px;
+            font-weight: 500;
+        }
+        
+        .param-input {
+            background: rgba(0, 0, 0, 0.3);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 8px;
+            padding: 8px 12px;
+            color: white;
+            transition: all 0.2s;
+            width: 100%;
+            font-size: 12px;
+        }
+        
+        .param-input:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+        
+        .mode-toggle {
+            display: inline-flex;
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 8px;
+            padding: 2px;
+            gap: 2px;
+        }
+        
+        .mode-btn {
+            padding: 6px 12px;
+            border-radius: 6px;
+            border: none;
+            background: transparent;
+            color: #8b949e;
+            cursor: pointer;
+            font-size: 12px;
+            transition: all 0.2s;
+        }
+        
+        .mode-btn.active {
+            background: #667eea;
+            color: white;
+        }
+        
+        .ai-chat-messages {
+            max-height: 100px;
+            overflow-y: auto;
+            overflow-x: hidden;
+        }
+        
+        .ai-chat-messages::-webkit-scrollbar {
+            width: 4px;
+        }
+        
+        .ai-chat-messages::-webkit-scrollbar-track {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 2px;
+        }
+        
+        .ai-chat-messages::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.2);
+            border-radius: 2px;
+        }
+        
+        .dashboard-container {
+            height: 100vh;
+            width: 100vw;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        
+        .backtest-mode {
+            border-color: rgba(251, 191, 36, 0.3);
+        }
+        
+        .prediction-card {
+            background: linear-gradient(135deg, rgba(102, 126, 234, 0.1) 0%, rgba(118, 75, 162, 0.1) 100%);
+            border: 1px solid rgba(102, 126, 234, 0.3);
+        }
+        
+        /* Top bar: metrics + ticker */
+        .top-bar {
+            display: flex;
+            gap: 12px;
+            padding: 8px 16px;
+            min-height: 64px;
+            max-height: 72px;
+            flex-shrink: 0;
+        }
+        
+        .metrics-summary {
+            flex: 0 0 25%;
+            min-width: 0;
+            max-width: 25%;
+        }
+        
+        .ticker-zone {
+            flex: 1;
+            min-width: 0;
+        }
+        
+        /* Metrics grid inside summary card */
+        .metrics-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 6px;
+            height: 100%;
+        }
+        
+        .metric-item {
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            padding: 4px 6px;
+        }
+        
+        .metric-label {
+            font-size: 9px;
+            color: #8b949e;
+            margin-bottom: 2px;
+            line-height: 1.2;
+        }
+        
+        .metric-value {
+            font-size: 13px;
+            font-weight: 700;
+            line-height: 1.2;
+        }
+        
+        /* Bottom AI zone - reduced height */
+        .bottom-ai-zone {
+            height: 160px;
+            max-height: 160px;
+            flex-shrink: 0;
+        }
+        
+        /* Params panel - hide scrollbar */
+        .params-panel-content {
+            overflow-y: auto;
+            overflow-x: hidden;
+        }
+        
+        .params-panel-content::-webkit-scrollbar {
+            display: none;
+        }
+        
+        .params-panel-content {
+            -ms-overflow-style: none;
+            scrollbar-width: none;
+        }
+        
+        /* Chart area - dominant */
+        .chart-area {
+            flex: 1;
+            min-height: 0;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        /* Mode transition */
+        [data-mode="backtest"] .backtest-mode {
+            border-color: rgba(251, 191, 36, 0.5);
+        }
+        
+        [data-mode="test"] .mode-indicator {
+            display: inline-block;
+        }
+    </style>
 </head>
 <body>
-<div class=\"cbp-page\">
-  <div class=\"cbp-frame\">
-
-    <header class=\"cbp-topbar\">
-      <div class=\"cbp-topbar-left\">
-        <div class=\"cbp-title\">CryptoBot Pro</div>
-        <div class=\"cbp-subtitle\">Личный дашборд · Mock candles</div>
-      </div>
-      <div class=\"cbp-topbar-center\">
-        <div class=\"cbp-field\">
-          <span>Пара</span>
-          <select id=\"symbol\">
-            <option>BTCUSDT</option>
-            <option>ETHUSDT</option>
-            <option>SOLUSDT</option>
-          </select>
-        </div>
-        <div class=\"cbp-field\">
-          <span>Таймфрейм</span>
-          <select id=\"tf\">
-            <option>1m</option>
-            <option>5m</option>
-            <option>15m</option>
-            <option>1h</option>
-          </select>
-        </div>
-      </div>
-      <div class=\"cbp-topbar-right\">
-        <div class=\"cbp-chip-toggle\">
-          <span class=\"cbp-dot\"></span>
-          <span>Testnet mock</span>
-        </div>
-        <div class=\"cbp-chip-toggle\">
-          <span>Спросить AI о рынке</span>
-        </div>
-      </div>
-    </header>
-
-    <section class=\"cbp-metrics-row\">
-      <div class=\"cbp-card\">
-        <div class=\"cbp-card-title\">Equity</div>
-        <div class=\"cbp-card-value\">10 000 USDT</div>
-      </div>
-      <div class=\"cbp-card\">
-        <div class=\"cbp-card-title\">P&amp;L (mock)</div>
-        <div class=\"cbp-card-value cbp-text-green\">+2.3%</div>
-      </div>
-      <div class=\"cbp-card\">
-        <div class=\"cbp-card-title\">Открытых сделок</div>
-        <div class=\"cbp-card-value\">0</div>
-      </div>
-    </section>
-
-    <section class=\"cbp-main-row\">
-      <div class=\"cbp-chart-card\">
-        <div class=\"cbp-chart-header\">
-          <div class=\"cbp-chart-title-block\">
-            <div class=\"cbp-chart-title\">График цены</div>
-            <div class=\"cbp-chart-subtitle\">BTCUSDT · 1h</div>
-          </div>
-          <div class=\"cbp-chart-actions\">
-            <div class=\"cbp-status-inline\">
-              <span class=\"cbp-status-dot\"></span>
-              <span>online</span>
+    <div id="app" class="dashboard-container" x-data="dashboardApp()" x-init="init()" :data-mode="mode">
+        <!-- Header with mode toggle -->
+        <header class="px-4 py-2 border-b border-white/10 flex items-center justify-between flex-shrink-0" style="height: 48px;">
+            <div class="flex items-center space-x-4">
+                <h1 class="text-xl font-bold gradient-text">CryptoBot Pro</h1>
+                <div class="flex items-center space-x-2">
+                    <div :class="status === 'онлайн' ? 'bg-green-500' : 'bg-red-500'" 
+                         class="w-2 h-2 rounded-full status-online"></div>
+                    <span class="text-xs text-gray-400" x-text="status"></span>
+                    <span x-show="mode === 'test'" class="text-xs px-2 py-0.5 bg-yellow-500/20 text-yellow-400 rounded">Test</span>
+                    <span x-show="mode === 'backtest'" class="text-xs px-2 py-0.5 bg-amber-500/20 text-amber-400 rounded">BackTest</span>
+                </div>
             </div>
-            <div class=\"cbp-timeframe-switch\">
-              <button class=\"cbp-tf-btn cbp-tf-btn--active\">1m</button>
-              <button class=\"cbp-tf-btn\">5m</button>
-              <button class=\"cbp-tf-btn\">1h</button>
+            <div class="flex items-center space-x-4">
+                <div class="text-xs">
+                    <span class="text-gray-400">Баланс:</span>
+                    <span class="font-semibold ml-1" data-cbp="balance" x-text="'$' + (balance || 0).toFixed(2)">$10 000.00</span>
+                </div>
+                <div class="text-xs">
+                    <span class="text-gray-400">П/У 24ч:</span>
+                    <span :class="(dailyPnl || 0) >= 0 ? 'text-green-400' : 'text-red-400'" 
+                          class="font-semibold ml-1" 
+                          data-cbp="daily-pnl"
+                          x-text="((dailyPnl || 0) >= 0 ? '+' : '') + (dailyPnl || 0).toFixed(2) + '%'">+1.23%</span>
+                </div>
+                <!-- Mode Toggle -->
+                <div class="mode-toggle">
+                    <button @click="setMode('real')" :class="{'active': mode === 'real'}" class="mode-btn">Real</button>
+                    <button @click="setMode('test')" :class="{'active': mode === 'test'}" class="mode-btn">Test</button>
+                    <button @click="setMode('backtest')" :class="{'active': mode === 'backtest'}" class="mode-btn">BackTest</button>
+                </div>
             </div>
-            <button id=\"btn-backtest\" class=\"cbp-btn-primary\">Run backtest</button>
-          </div>
-        </div>
-        <div class=\"cbp-chart-body\">
-          <div id=\"chart-root\"></div>
-        </div>
-      </div>
+        </header>
 
-      <aside class=\"cbp-sidebar-column\">
-        <div class=\"cbp-card\">
-          <div class=\"cbp-side-card-title-row\">
-            <span>Сводка портфеля</span>
-          </div>
-          <div class=\"cbp-side-kv-row\">
-            <span>Equity</span><span>10 000 USDT</span>
-          </div>
-          <div class=\"cbp-side-kv-row\">
-            <span>P&amp;L (mock)</span><span class=\"cbp-text-green\">+2.3%</span>
-          </div>
-          <div class=\"cbp-side-kv-row\">
-            <span>Открытых сделок</span><span>0</span>
-          </div>
-          <div class=\"cbp-side-kv-row\">
-            <span>Стратегия</span><span>Three-Candle (demo)</span>
-          </div>
+        <!-- Top Bar: Metrics Summary (25%) + Ticker (75%) -->
+        <div class="top-bar">
+            <!-- Metrics Summary Card (25%) -->
+            <div class="metrics-summary glass-card p-2">
+                <div class="metrics-grid">
+                    <!-- Real/Test Mode Metrics -->
+                    <template x-if="mode === 'real' || mode === 'test'">
+                        <div>
+                            <div class="metric-item">
+                                <div class="metric-label">Общая прибыль</div>
+                                <div class="metric-value text-green-400" data-cbp="total-profit" x-text="'$' + (totalProfit || 0).toFixed(2)">$2 500.00</div>
+                            </div>
+                            <div class="metric-item">
+                                <div class="metric-label">Винрейт</div>
+                                <div class="metric-value" data-cbp="winrate" x-text="(winRate || 0).toFixed(1) + '%'">62.5%</div>
+                            </div>
+                            <div class="metric-item">
+                                <div class="metric-label">Активных позиций</div>
+                                <div class="metric-value" data-cbp="active-positions" x-text="activePositions || 0">2</div>
+                            </div>
+                            <div class="metric-item">
+                                <div class="metric-label">Уровень риска</div>
+                                <div class="metric-value" 
+                                     :class="(riskScore || 0) > 70 ? 'text-red-400' : (riskScore || 0) > 40 ? 'text-yellow-400' : 'text-green-400'" 
+                                     data-cbp="risk-level" 
+                                     x-text="(riskScore || 0) + '%'">35%</div>
+                            </div>
+                        </div>
+                    </template>
+                    
+                    <!-- BackTest Mode Metrics -->
+                    <template x-if="mode === 'backtest'">
+                        <div>
+                            <div class="metric-item">
+                                <div class="metric-label">Прибыль за период</div>
+                                <div class="metric-value" 
+                                     :class="(backtestStats?.totalProfit || 0) >= 0 ? 'text-green-400' : 'text-red-400'"
+                                     x-text="backtestStats ? '$' + (backtestStats.totalProfit || 0).toFixed(2) : '--'">--</div>
+                            </div>
+                            <div class="metric-item">
+                                <div class="metric-label">Винрейт</div>
+                                <div class="metric-value" x-text="backtestStats ? (backtestStats.winRate || 0).toFixed(1) + '%' : '--'">--</div>
+                            </div>
+                            <div class="metric-item">
+                                <div class="metric-label">Макс. просадка</div>
+                                <div class="metric-value text-red-400" x-text="backtestStats ? (backtestStats.maxDrawdown || 0).toFixed(2) + '%' : '--'">--</div>
+                            </div>
+                            <div class="metric-item">
+                                <div class="metric-label">Profit Factor</div>
+                                <div class="metric-value" x-text="backtestStats ? (backtestStats.profitFactor || 0).toFixed(2) : '--'">--</div>
+                            </div>
+                        </div>
+                    </template>
+                </div>
+            </div>
+
+            <!-- Ticker Zone (75%) -->
+            <div class="ticker-zone glass-card p-2">
+                <div id="trade-ticker" class="ticker"></div>
+            </div>
         </div>
 
-        <div class=\"cbp-card\">
-          <div class=\"cbp-side-card-title-row\">
-            <span>Бэктест</span>
-            <span class=\"cbp-pill\">idle</span>
-          </div>
-          <div class=\"cbp-side-kv-row\">
-            <span>Доходность</span><span id=\"bt-ret\">12.50%</span>
-          </div>
-          <div class=\"cbp-side-kv-row\">
-            <span>Сделок</span><span id=\"bt-trades\">14</span>
-          </div>
+        <!-- Main Content: Params Left + Chart Right -->
+        <div class="flex-1 flex gap-3 px-4 pb-2 min-h-0">
+            <!-- Params Sidebar (Left) -->
+            <div class="w-72 glass-card p-3 flex flex-col min-h-0 flex-shrink-0" :class="{'backtest-mode': mode === 'backtest'}">
+                <h2 class="text-sm font-semibold mb-2">Параметры</h2>
+                <div id="params-panel" class="flex-1 params-panel-content"></div>
+                <!-- Backtest controls (only in backtest mode) -->
+                <div x-show="mode === 'backtest'" class="mt-2 pt-2 border-t border-white/10">
+                    <button @click="runBacktest()" 
+                            :disabled="backtestRunning"
+                            class="w-full py-1.5 bg-gradient-to-r from-purple-600 to-blue-600 rounded-lg font-semibold text-xs hover:opacity-90 transition disabled:opacity-50">
+                        <span x-show="!backtestRunning">🚀 Запустить бэктест</span>
+                        <span x-show="backtestRunning">⏳ Запуск...</span>
+                    </button>
+                    <!-- Backtest stats -->
+                    <div x-show="backtestStats" class="mt-2 space-y-1 text-xs">
+                        <div class="flex justify-between">
+                            <span class="text-gray-400">Сделок:</span>
+                            <span x-text="backtestStats?.totalTrades || 0"></span>
+                        </div>
+                        <div class="flex justify-between">
+                            <span class="text-gray-400">Средний R:</span>
+                            <span x-text="backtestStats ? (backtestStats.avgR || 0).toFixed(2) : '--'"></span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Chart Area (Right) - DOMINANT -->
+            <div class="chart-area glass-card p-3">
+                <div class="flex items-center justify-between mb-1.5 flex-shrink-0">
+                    <h2 class="text-sm font-semibold">
+                        <span x-text="chartParams.symbol || 'BTCUSDT'"></span> 
+                        <span class="text-gray-400" x-text="getTimeframeString()"></span>
+                    </h2>
+                </div>
+                <div class="chart-container flex-1 min-h-0">
+                    <div id="main-chart"></div>
+                    <div id="trade-tooltip" class="trade-tooltip"></div>
+                </div>
+            </div>
         </div>
 
-        <div class=\"cbp-card\">
-          <div class=\"cbp-side-card-title-row\">
-            <span>Статус системы</span>
-          </div>
-          <div class=\"cbp-status-grid\">
-            <span class=\"cbp-status-label\">Backend</span>
-            <span class=\"cbp-status-value\"><span class=\"cbp-ind-dot\"></span>ok</span>
-            <span class=\"cbp-status-label\">WebSocket</span>
-            <span class=\"cbp-status-value\"><span class=\"cbp-ind-dot\"></span>online</span>
-            <span class=\"cbp-status-label\">Net</span>
-            <span class=\"cbp-status-value\"><span class=\"cbp-ind-dot\"></span>Testnet mock</span>
-          </div>
-        </div>
-      </aside>
-    </section>
+        <!-- Bottom: AI Chat + AI Predictor/Backtest Results -->
+        <div class="bottom-ai-zone px-4 pb-2 flex gap-3">
+            <!-- AI Chat (same width as chart) -->
+            <div class="flex-1 glass-card p-2 flex flex-col min-w-0">
+                <div id="ai-panel"></div>
+            </div>
 
-  </div>
-</div>
+            <!-- AI Predictor / Backtest Results -->
+            <div class="w-96 glass-card p-2 flex flex-col prediction-card flex-shrink-0">
+                <!-- Real/Test Mode: AI Predictor -->
+                <template x-if="mode === 'real' || mode === 'test'">
+                    <div class="flex flex-col h-full">
+                        <h2 class="text-sm font-semibold mb-1.5 flex-shrink-0">🔮 AI Предсказатель</h2>
+                        <div id="ai-predictor" class="flex-1 overflow-y-auto min-h-0">
+                            <div class="space-y-1.5">
+                                <!-- Price Prediction -->
+                                <div class="p-1.5 bg-white/5 rounded-lg">
+                                    <div class="text-xs text-gray-400 mb-0.5">Прогноз цены (24ч)</div>
+                                    <div class="flex items-baseline gap-1.5">
+                                        <span class="text-lg font-bold" :class="prediction.priceDirection === 'up' ? 'text-green-400' : 'text-red-400'"
+                                              x-text="prediction.priceTarget ? '$' + prediction.priceTarget.toFixed(2) : '--'">--</span>
+                                        <span class="text-xs" :class="prediction.priceChange >= 0 ? 'text-green-400' : 'text-red-400'"
+                                              x-text="prediction.priceChange ? (prediction.priceChange >= 0 ? '+' : '') + prediction.priceChange.toFixed(2) + '%' : ''"></span>
+                                    </div>
+                                </div>
+                                
+                                <!-- Signal Strength -->
+                                <div class="p-1.5 bg-white/5 rounded-lg">
+                                    <div class="text-xs text-gray-400 mb-0.5">Сила сигнала</div>
+                                    <div class="flex items-center gap-1.5">
+                                        <div class="flex-1 h-1.5 bg-white/10 rounded-full overflow-hidden">
+                                            <div class="h-full bg-gradient-to-r from-red-500 via-yellow-500 to-green-500 transition-all"
+                                                 :style="'width: ' + (prediction.signalStrength || 0) + '%'"></div>
+                                        </div>
+                                        <span class="text-xs font-semibold" x-text="(prediction.signalStrength || 0) + '%'">0%</span>
+                                    </div>
+                                </div>
+                                
+                                <!-- Market Sentiment -->
+                                <div class="p-1.5 bg-white/5 rounded-lg">
+                                    <div class="text-xs text-gray-400 mb-0.5">Настроение рынка</div>
+                                    <div class="text-xs" x-text="prediction.sentiment || 'Анализ...'">Анализ...</div>
+                                </div>
+                                
+                                <!-- Key Levels -->
+                                <div class="p-1.5 bg-white/5 rounded-lg">
+                                    <div class="text-xs text-gray-400 mb-0.5">Ключевые уровни</div>
+                                    <div class="text-xs space-y-0.5">
+                                        <div class="flex justify-between">
+                                            <span>Поддержка:</span>
+                                            <span class="text-green-400" x-text="prediction.support ? '$' + prediction.support.toFixed(2) : '--'">--</span>
+                                        </div>
+                                        <div class="flex justify-between">
+                                            <span>Сопротивление:</span>
+                                            <span class="text-red-400" x-text="prediction.resistance ? '$' + prediction.resistance.toFixed(2) : '--'">--</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </template>
+                
+                <!-- BackTest Mode: Results -->
+                <template x-if="mode === 'backtest'">
+                    <div class="flex flex-col h-full">
+                        <h2 class="text-sm font-semibold mb-1.5 flex-shrink-0">📊 Итоги бэктеста</h2>
+                        <div class="flex-1 overflow-y-auto min-h-0">
+                            <div class="space-y-1.5">
+                                <div class="p-1.5 bg-white/5 rounded-lg">
+                                    <div class="text-xs text-gray-400 mb-0.5">Общий результат</div>
+                                    <div class="text-sm font-bold" 
+                                         :class="(backtestStats?.totalProfit || 0) >= 0 ? 'text-green-400' : 'text-red-400'"
+                                         x-text="backtestStats ? '$' + (backtestStats.totalProfit || 0).toFixed(2) : 'Запустите бэктест'">Запустите бэктест</div>
+                                </div>
+                                
+                                <div class="p-1.5 bg-white/5 rounded-lg">
+                                    <div class="text-xs text-gray-400 mb-0.5">Лучшая сделка</div>
+                                    <div class="text-xs" x-text="backtestStats ? 'R: +' + (backtestStats.bestTrade || 0).toFixed(2) : '--'">--</div>
+                                </div>
+                                
+                                <div class="p-1.5 bg-white/5 rounded-lg">
+                                    <div class="text-xs text-gray-400 mb-0.5">Худшая сделка</div>
+                                    <div class="text-xs text-red-400" x-text="backtestStats ? 'R: ' + (backtestStats.worstTrade || 0).toFixed(2) : '--'">--</div>
+                                </div>
+                                
+                                <div class="p-1.5 bg-white/5 rounded-lg">
+                                    <div class="text-xs text-gray-400 mb-0.5">Средняя длительность</div>
+                                    <div class="text-xs" x-text="backtestStats ? (backtestStats.avgDuration || 0) + ' мин' : '--'">--</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </template>
+            </div>
+        </div>
+    </div>
+
+    <script type="module">
+        import { updateChart } from '/static/js/cbp_charts.js';
+        import { TradeTicker } from '/static/js/cbp_ticker.js';
+        import { ParamsPanel } from '/static/js/cbp_params_panel.js';
+        import { AIPanel } from '/static/js/cbp_ai_panel.js';
+        import { fetchDashboardSnapshot } from '/static/js/cbp_api.js';
+        import { dashboardState } from '/static/js/cbp_state.js';
+        import { initDashboardRealtime } from '/static/js/cbp_realtime.js';
+
+        let ticker = null;
+        let paramsPanel = null;
+        let aiPanel = null;
+
+        function dashboardApp() {
+            return {
+                status: 'онлайн',
+                mode: 'real',
+                balance: 10000,
+                dailyPnl: 2.35,
+                totalProfit: 2847.50,
+                winRate: 68.5,
+                activePositions: 3,
+                riskScore: 35,
+                
+                chartParams: {
+                    symbol: 'BTCUSDT',
+                    exchange: 'bybit',
+                    timeframe: '15m',
+                    strategy: 'momentum_ml_v2',
+                    riskDollars: 100
+                },
+                
+                backtestRunning: false,
+                backtestStats: null,
+                
+                prediction: {
+                    priceTarget: null,
+                    priceChange: null,
+                    priceDirection: 'up',
+                    signalStrength: 0,
+                    sentiment: 'Анализ...',
+                    support: null,
+                    resistance: null
+                },
+                
+                init() {
+                    // Sync mode with dashboardState
+                    dashboardState.mode = this.mode;
+                    
+                    // Синхронизируем данные с общим состоянием
+                    this.applySnapshot(dashboardState);
+                    window.addEventListener('cbp:dashboard_update', (event) => {
+                        this.applySnapshot(event.detail?.snapshot || dashboardState);
+                    });
+                    
+                    window.addEventListener('cbp:dashboard_ready', (event) => {
+                        const detail = event.detail || {};
+                        if (detail.ticker) {
+                            ticker = detail.ticker;
+                        }
+                        if (detail.paramsPanel) {
+                            this.registerParamsPanel(detail.paramsPanel);
+                        }
+                        if (detail.aiPanel) {
+                            aiPanel = detail.aiPanel;
+                        }
+                    });
+                    
+                    // Используем компоненты, инициализированные в cbp_dashboard_main, иначе - запасной вариант
+                    if (window.__cbp_main_module_present && window.cbpDashboard?.paramsPanel) {
+                        this.registerParamsPanel(window.cbpDashboard.paramsPanel);
+                        ticker = window.cbpDashboard.ticker || ticker;
+                        aiPanel = window.cbpDashboard.aiPanel || aiPanel;
+                    } else if (!window.__cbp_main_module_present) {
+                        ticker = new TradeTicker('trade-ticker');
+                        this.registerParamsPanel(new ParamsPanel('params-panel'));
+                        aiPanel = new AIPanel('ai-panel');
+                        window.__cbp_fallback_ticker = ticker;
+                        window.__cbp_fallback_params_panel = paramsPanel;
+                        window.__cbp_fallback_ai_panel = aiPanel;
+                    } else {
+                        setTimeout(() => {
+                            if (!window.__cbp_main_bootstrapped && !paramsPanel) {
+                                ticker = new TradeTicker('trade-ticker');
+                                this.registerParamsPanel(new ParamsPanel('params-panel'));
+                                aiPanel = new AIPanel('ai-panel');
+                                window.__cbp_fallback_ticker = ticker;
+                                window.__cbp_fallback_params_panel = paramsPanel;
+                                window.__cbp_fallback_ai_panel = aiPanel;
+                            }
+                        }, 400);
+                    }
+                    
+                    // Initialize chart after DOM is ready
+                    setTimeout(() => {
+                        this.ensureChartInitialized();
+                        if (!window.__cbp_main_bootstrapped) {
+                            this.loadDashboardData();
+                        }
+                        if (this.mode === 'real' || this.mode === 'test') {
+                            this.loadPrediction();
+                        }
+                    }, 200);
+                    
+                    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+                    const wsUrl = `${protocol}//${window.location.host}/ws/dashboard`;
+                    initDashboardRealtime({ wsUrl });
+                    
+                    setInterval(() => {
+                        if (this.mode === 'real') {
+                            this.loadPrediction();
+                        }
+                    }, 10000);
+                },
+                
+                ensureChartInitialized() {
+                    const chartEl = document.getElementById('main-chart');
+                    if (!chartEl) {
+                        console.warn('[Dashboard] Chart container not found, retrying...');
+                        setTimeout(() => this.ensureChartInitialized(), 100);
+                        return;
+                    }
+                    
+                    // Check if chart is already initialized by main module
+                    if (window.cbpDashboard?.initChart) {
+                        window.cbpDashboard.initChart();
+                    } else {
+                        // Fallback: import and call initChart
+                        import('/static/js/cbp_charts.js').then(module => {
+                            if (module.initChart) {
+                                module.initChart();
+                                this.updateChart();
+                            }
+                        });
+                    }
+                },
+                
+                setMode(newMode) {
+                    this.mode = newMode;
+                    dashboardState.setMode(newMode);
+                    
+                    // Update data-mode attribute
+                    const app = document.getElementById('app');
+                    if (app) {
+                        app.setAttribute('data-mode', newMode);
+                    }
+                    
+                    // Emit mode change event
+                    window.dispatchEvent(new CustomEvent('cbp:mode_changed', { detail: { mode: newMode } }));
+                    
+                    this.updateChart();
+                    if (newMode === 'backtest') {
+                        this.prediction = {
+                            priceTarget: null,
+                            priceChange: null,
+                            priceDirection: 'up',
+                            signalStrength: 0,
+                            sentiment: 'Режим бэктеста',
+                            support: null,
+                            resistance: null
+                        };
+                    } else {
+                        this.loadPrediction();
+                    }
+                },
+                
+                getTimeframeString() {
+                    return this.chartParams.timeframe || '15m';
+                },
+                
+                async loadDashboardData() {
+                    try {
+                        const timeframe = this.getTimeframeString();
+                        const snapshot = await fetchDashboardSnapshot({ 
+                            symbol: this.chartParams.symbol, 
+                            timeframe: timeframe 
+                        });
+                        dashboardState.setSnapshot(snapshot);
+                        
+                        this.balance = snapshot.balance ?? snapshot.equity ?? this.balance;
+                        this.dailyPnl = snapshot.daily_pnl_pct ?? snapshot.dailyPnlPct ?? this.dailyPnl;
+                        this.totalProfit = snapshot.total_profit ?? snapshot.totalProfit ?? this.totalProfit;
+                        this.winRate = snapshot.winrate_pct ?? snapshot.winratePct ?? this.winRate;
+                        this.activePositions = snapshot.active_positions ?? snapshot.activePositions ?? this.activePositions;
+                        this.riskScore = snapshot.risk_level_pct ?? snapshot.riskLevelPct ?? this.riskScore;
+                        
+                        if (snapshot.trades && ticker) {
+                            ticker.setTrades(snapshot.trades);
+                        }
+                    } catch (error) {
+                        console.error('[Dashboard] Failed to load data:', error);
+                    }
+                },
+
+                applySnapshot(snapshot) {
+                    if (!snapshot) return;
+                    this.balance = snapshot.balance ?? snapshot.equity ?? this.balance;
+                    this.dailyPnl = snapshot.daily_pnl_pct ?? snapshot.dailyPnlPct ?? this.dailyPnl;
+                    this.totalProfit = snapshot.total_profit ?? snapshot.totalProfit ?? this.totalProfit;
+                    this.winRate = snapshot.winrate_pct ?? snapshot.winratePct ?? this.winRate;
+                    this.activePositions = snapshot.active_positions ?? snapshot.activePositions ?? this.activePositions;
+                    this.riskScore = snapshot.risk_level_pct ?? snapshot.riskLevelPct ?? this.riskScore;
+                    if (snapshot.symbol) {
+                        this.chartParams.symbol = snapshot.symbol;
+                    }
+                    if (snapshot.timeframe) {
+                        this.chartParams.timeframe = snapshot.timeframe;
+                    }
+                    if (snapshot.exchange) {
+                        this.chartParams.exchange = snapshot.exchange;
+                    }
+                    if (snapshot.trades && ticker) {
+                        ticker.setTrades(snapshot.trades);
+                    }
+                },
+
+                registerParamsPanel(panel) {
+                    if (!panel) return;
+                    paramsPanel = panel;
+                    if (panel.getValues) {
+                        this.chartParams = { ...this.chartParams, ...panel.getValues() };
+                    }
+                    if (!panel.__cbp_dashboard_bound) {
+                        panel.__cbp_dashboard_bound = true;
+                        panel.onChange((key, value, allValues) => {
+                            this.chartParams = { ...this.chartParams, ...allValues };
+                            if (key === 'timeframe') {
+                                dashboardState.timeframe = value;
+                            }
+                            this.updateChart();
+                            this.loadDashboardData();
+                            if (this.mode === 'real' || this.mode === 'test') {
+                                this.loadPrediction();
+                            }
+                        });
+                    }
+                },
+                
+                async loadPrediction() {
+                    try {
+                        const response = await fetch(`/api/ai/predict?symbol=${this.chartParams.symbol}&timeframe=${this.getTimeframeString()}`);
+                        if (response.ok) {
+                            const data = await response.json();
+                            this.prediction = {
+                                priceTarget: data.price_target || null,
+                                priceChange: data.price_change || null,
+                                priceDirection: (data.price_change || 0) >= 0 ? 'up' : 'down',
+                                signalStrength: data.signal_strength || 0,
+                                sentiment: data.sentiment || 'Анализ...',
+                                support: data.support || null,
+                                resistance: data.resistance || null
+                            };
+                        }
+                    } catch (error) {
+                        console.error('[Dashboard] Failed to load prediction:', error);
+                    }
+                },
+                
+                async runBacktest() {
+                    this.backtestRunning = true;
+                    try {
+                        const timeframe = this.getTimeframeString();
+                        const response = await fetch('/api/backtest/run', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                symbol: this.chartParams.symbol,
+                                interval: timeframe,
+                                strategy: this.chartParams.strategy,
+                                risk_per_trade: this.chartParams.riskDollars,
+                                rr_ratio: 4.0,
+                                limit: 500
+                            })
+                        });
+                        
+                        if (response.ok) {
+                            const result = await response.json();
+                            const trades = result.trades || [];
+                            const winningTrades = trades.filter(t => (t.result_R || 0) > 0);
+                            
+                            const totalProfit = trades.reduce((sum, t) => sum + ((t.result_R || 0) * this.chartParams.riskDollars), 0);
+                            const winRate = trades.length > 0 ? (winningTrades.length / trades.length) * 100 : 0;
+                            const avgR = trades.length > 0 ? trades.reduce((sum, t) => sum + (t.result_R || 0), 0) / trades.length : 0;
+                            
+                            const rValues = trades.map(t => t.result_R || 0);
+                            const bestTrade = Math.max(...rValues, 0);
+                            const worstTrade = Math.min(...rValues, 0);
+                            
+                            this.backtestStats = {
+                                totalProfit,
+                                winRate,
+                                totalTrades: trades.length,
+                                avgR,
+                                maxDrawdown: result.max_drawdown || 0,
+                                profitFactor: result.profit_factor || 0,
+                                bestTrade,
+                                worstTrade,
+                                avgDuration: result.avg_duration || 0
+                            };
+                            
+                            // Update chart with backtest trades
+                            updateChart({
+                                symbol: this.chartParams.symbol,
+                                timeframe: timeframe,
+                                exchange: this.chartParams.exchange,
+                                trades: trades
+                            });
+                        }
+                    } catch (error) {
+                        console.error('[Dashboard] Backtest error:', error);
+                    } finally {
+                        this.backtestRunning = false;
+                    }
+                },
+                
+                updateChart() {
+                    const params = {
+                        symbol: this.chartParams.symbol,
+                        timeframe: this.getTimeframeString(),
+                        exchange: this.chartParams.exchange,
+                        mode: this.mode
+                    };
+                    updateChart(params);
+                }
+            };
+        }
+        
+        window.dashboardApp = dashboardApp;
+        
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', () => {
+                console.log('[CBP] Dashboard modules loaded');
+            });
+        } else {
+            console.log('[CBP] Dashboard modules loaded');
+        }
+    </script>
+    
+    <script type="module" src="/static/js/cbp_dashboard_main.js"></script>
 </body>
 </html>
